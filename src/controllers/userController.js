@@ -2,7 +2,7 @@ const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const User = require("../models/User");
 const cloudinary = require("cloudinary").v2;
 const EmailOtp = require("../models/EmailOtp");
-const admin = require("../config/firebaseAdmin");
+const { checkSmsVerification } = require("../utils/twilioVerify");
 
 class UserController {
   /**
@@ -563,42 +563,54 @@ class UserController {
   }
 
   /**
-   * Change phone with Firebase verification
+   * Change phone with OTP verification
    * POST /api/v1/users/me/change-phone
-   * Requires: firebase_token (from phone auth)
+   * Requires: phoneNumber, code
    */
   static async changePhone(req, res, next) {
     try {
       const userId = req.user.id;
-      const { firebase_token } = req.body;
+      const { phoneNumber, code } = req.body;
 
-      if (!firebase_token) {
+      if (!phoneNumber || !code) {
         return res.status(400).json({
           success: false,
-          message: "Firebase token is required for phone verification",
+          message: "phoneNumber and code are required",
         });
       }
 
-      // Verify Firebase token and extract phone number
-      let phoneNumber = null;
-      let firebaseUid = null;
-
+      // Verify OTP with Twilio Verify
       try {
-        const decoded = await admin.auth().verifyIdToken(firebase_token);
-        firebaseUid = decoded.uid;
-        phoneNumber = decoded.phone_number;
+        const verificationCheck = await checkSmsVerification(phoneNumber, code);
+        if (verificationCheck.status !== "approved") {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid or expired OTP code",
+          });
+        }
       } catch (err) {
-        return res.status(401).json({
-          success: false,
-          message: "Invalid or expired firebase token",
-        });
-      }
+        if (err?.status === 400 || err?.status === 404) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid or expired OTP code",
+          });
+        }
 
-      if (!phoneNumber) {
-        return res.status(400).json({
-          success: false,
-          message: "No phone number found in firebase token",
-        });
+        if (err?.status === 429) {
+          return res.status(429).json({
+            success: false,
+            message: "Too many verification attempts. Please try again later.",
+          });
+        }
+
+        if (err?.status === 401) {
+          return res.status(500).json({
+            success: false,
+            message: "OTP service is not configured",
+          });
+        }
+
+        throw err;
       }
 
       // Check if phone is already in use by another user
@@ -615,13 +627,12 @@ class UserController {
         });
       }
 
-      // Update the phone number and firebase_uid
+      // Update the phone number and mark it verified
       const updatedUser = await User.findByIdAndUpdate(
         userId,
         {
           phone: phoneNumber,
           phone_verified: true,
-          firebase_uid: firebaseUid,
         },
         { new: true },
       ).select("-password_hash");

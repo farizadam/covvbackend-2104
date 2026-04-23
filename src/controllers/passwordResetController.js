@@ -2,7 +2,7 @@ const bcrypt = require("bcrypt");
 const { sendEmail } = require("../services/emailService");
 const EmailOtp = require("../models/EmailOtp");
 const User = require("../models/User");
-const admin = require("../config/firebaseAdmin");
+const { checkSmsVerification } = require("../utils/twilioVerify");
 
 const OTP_TTL_SECONDS = 10 * 60; // 10 minutes
 const VERIFIED_TTL_SECONDS = 15 * 60; // 15 minutes to reset password after verification
@@ -199,42 +199,53 @@ class PasswordResetController {
   }
 
   /**
-   * Step 2b: Verify phone via Firebase token (for phone-based reset)
+   * Step 2b: Verify phone via OTP code (for phone-based reset)
    * POST /api/v1/auth/forgot-password/verify-phone
-   * Body: { phone, firebase_token }
+   * Body: { phone, code }
    */
   static async verifyPhone(req, res, next) {
     try {
-      const { phone, firebase_token } = req.body;
+      const { phone, code } = req.body;
 
-      if (!phone || !firebase_token) {
+      if (!phone || !code) {
         return res.status(400).json({
           success: false,
-          message: "Phone and firebase_token are required",
+          message: "Phone and code are required",
         });
       }
 
-      // Verify Firebase token
-      let decoded;
+      // Verify OTP code
       try {
-        decoded = await admin.auth().verifyIdToken(firebase_token);
+        const verificationCheck = await checkSmsVerification(phone, code);
+        if (verificationCheck.status !== "approved") {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid or expired OTP code",
+          });
+        }
       } catch (err) {
-        console.warn("DEBUG forgot-password verify-phone: firebase token failed", err?.message);
-        return res.status(401).json({
-          success: false,
-          message: "Invalid or expired firebase token",
-        });
-      }
+        if (err?.status === 400 || err?.status === 404) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid or expired OTP code",
+          });
+        }
 
-      const phoneFromToken = decoded.phone_number || null;
-      console.log("DEBUG forgot-password verify-phone:", { phone, phoneFromToken });
+        if (err?.status === 429) {
+          return res.status(429).json({
+            success: false,
+            message: "Too many verification attempts. Please try again later.",
+          });
+        }
 
-      // Ensure the phone from the token matches
-      if (!phoneFromToken || phoneFromToken !== phone) {
-        return res.status(400).json({
-          success: false,
-          message: "Phone number does not match verified token",
-        });
+        if (err?.status === 401) {
+          return res.status(500).json({
+            success: false,
+            message: "OTP service is not configured",
+          });
+        }
+
+        throw err;
       }
 
       // Find user by phone

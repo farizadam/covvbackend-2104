@@ -58,6 +58,7 @@ app.get("/", (req, res) => {
 
 // API Routes
 app.use("/api/v1/auth", authRoutes);
+app.use("/api/auth", authRoutes);
 app.use("/api/v1/users", userRoutes);
 app.use("/api/v1/airports", airportRoutes);
 app.use("/api/v1/rides", rideRoutes);

@@ -2,9 +2,9 @@ const bcrypt = require("bcrypt");
 const { generateTokens, verifyRefreshToken } = require("../utils/jwt");
 const User = require("../models/User");
 const EmailOtp = require("../models/EmailOtp");
-const admin = require("../config/firebaseAdmin");
 const cloudinary = require("cloudinary").v2;
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const { sendSmsVerification, checkSmsVerification } = require("../utils/twilioVerify");
 const { loginOrRegisterWithGoogle, isProfileComplete } = require("../services/googleAuthService");
 const { loginOrRegisterWithFacebook } = require("../services/facebookAuthService");
 
@@ -115,15 +115,11 @@ class AuthController {
         role,
         id_image_front,
         id_image_back,
-        firebase_token,
       } = req.validatedBody;
 
       console.log("DEBUG: register received", {
         email: email && email.toLowerCase(),
         phone,
-        firebase_token: firebase_token
-          ? `${firebase_token.slice(0, 40)}...`
-          : null,
       });
 
       const timing = {
@@ -139,30 +135,7 @@ class AuthController {
         timing.last = now;
       }
 
-      let firebaseUid = null;
-      let phoneNumberFromToken = null;
-
-      // 1. Verify Phone via Firebase
-      if (firebase_token) {
-        try {
-          const decoded = await admin.auth().verifyIdToken(firebase_token);
-          firebaseUid = decoded.uid;
-          phoneNumberFromToken = decoded.phone_number || null;
-        } catch (err) {
-          console.warn(
-            "DEBUG: firebase token verification failed",
-            err && err.message ? err.message : err,
-          );
-          return res.status(401).json({
-            success: false,
-            message: "Invalid or expired firebase token",
-          });
-        }
-      }
-
-      logStep("firebase_verify");
-
-      const phoneNumber = phoneNumberFromToken || phone;
+      const phoneNumber = phone;
       if (!phoneNumber)
         return res
           .status(400)
@@ -241,8 +214,7 @@ class AuthController {
         role,
         auth_provider: "email",
         profile_complete: profileComplete,
-        firebase_uid: firebaseUid,
-        phone_verified: !!firebaseUid,
+        phone_verified: false,
         email_verified: true,
         // Store Cloudinary URLs and public IDs
         id_image_front_url: front.url,
@@ -370,7 +342,7 @@ class AuthController {
    */
   static async completeProfile(req, res, next) {
     try {
-      const { phone, firebase_token, id_image_front, id_image_back } = req.body;
+      const { phone, id_image_front, id_image_back } = req.body;
       const userId = req.user.id;
 
       const user = await User.findById(userId);
@@ -378,20 +350,7 @@ class AuthController {
         return res.status(404).json({ success: false, message: "User not found" });
       }
 
-      // Verify phone via Firebase if token provided
       let phoneNumber = phone;
-      if (firebase_token) {
-        try {
-          const decoded = await admin.auth().verifyIdToken(firebase_token);
-          if (decoded.phone_number) {
-            phoneNumber = decoded.phone_number;
-            user.firebase_uid = decoded.uid;
-            user.phone_verified = true;
-          }
-        } catch (err) {
-          return res.status(401).json({ success: false, message: "Invalid firebase token" });
-        }
-      }
 
       // Update phone
       if (phoneNumber) {
@@ -401,6 +360,7 @@ class AuthController {
           return res.status(409).json({ success: false, message: "Phone number already in use" });
         }
         user.phone = phoneNumber;
+        user.phone_verified = false;
       }
 
       // Process ID images
@@ -482,6 +442,126 @@ class AuthController {
       res.status(200).json({ success: true, message: "Account deleted" });
     } catch (error) {
       next(error);
+    }
+  }
+
+  /**
+   * Send phone OTP via Twilio Verify
+   * POST /api/auth/send-otp
+   */
+  static async sendOtp(req, res) {
+    try {
+      const { phoneNumber } = req.validatedBody;
+
+      const verification = await sendSmsVerification(phoneNumber);
+
+      return res.status(200).json({
+        success: true,
+        message: "OTP sent successfully",
+        data: {
+          phoneNumber,
+          status: verification.status,
+        },
+      });
+    } catch (error) {
+      if (
+        error?.message?.includes("Twilio credentials are missing") ||
+        error?.status === 401
+      ) {
+        return res.status(500).json({
+          success: false,
+          message: "OTP service is not configured",
+        });
+      }
+
+      if (error?.status === 400) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid phone number",
+          data: {
+            errorCode: error.code || null,
+            details: error.message,
+          },
+        });
+      }
+
+      if (error?.status === 429) {
+        return res.status(429).json({
+          success: false,
+          message: "Too many OTP requests. Please try again later.",
+        });
+      }
+
+      console.error("sendOtp error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to send OTP",
+      });
+    }
+  }
+
+  /**
+   * Verify phone OTP via Twilio Verify
+   * POST /api/auth/verify-otp
+   */
+  static async verifyOtp(req, res) {
+    try {
+      const { phoneNumber, code } = req.validatedBody;
+
+      const verificationCheck = await checkSmsVerification(phoneNumber, code);
+
+      if (verificationCheck.status === "approved") {
+        return res.status(200).json({
+          success: true,
+          message: "OTP verified successfully",
+          data: {
+            phoneNumber,
+            status: verificationCheck.status,
+          },
+        });
+      }
+
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or expired OTP code",
+        data: {
+          status: verificationCheck.status,
+        },
+      });
+    } catch (error) {
+      if (
+        error?.message?.includes("Twilio credentials are missing") ||
+        error?.status === 401
+      ) {
+        return res.status(500).json({
+          success: false,
+          message: "OTP service is not configured",
+        });
+      }
+
+      if (error?.status === 404 || error?.status === 400) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid or expired OTP code",
+          data: {
+            errorCode: error.code || null,
+            details: error.message,
+          },
+        });
+      }
+
+      if (error?.status === 429) {
+        return res.status(429).json({
+          success: false,
+          message: "Too many verification attempts. Please try again later.",
+        });
+      }
+
+      console.error("verifyOtp error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to verify OTP",
+      });
     }
   }
 }

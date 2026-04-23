@@ -96,11 +96,6 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    firebase_uid: {
-      type: String,
-      default: null,
-      index: true,
-    },
     phone_verified: {
       type: Boolean,
       default: false,

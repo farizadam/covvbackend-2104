@@ -13,7 +13,6 @@ const registerSchema = Joi.object({
   last_name: validationRules.lastName,
   phone: validationRules.phone,
   role: validationRules.role,
-  firebase_token: Joi.string().optional(),
   id_image_front: Joi.string().optional(),
   id_image_back: Joi.string().optional(),
 });
@@ -23,6 +22,33 @@ const loginSchema = Joi.object({
   password: Joi.string().required(),
 });
 
+const sendOtpSchema = Joi.object({
+  phoneNumber: Joi.string()
+    .trim()
+    .pattern(/^\+[1-9]\d{6,14}$/)
+    .required()
+    .messages({
+      "string.pattern.base": "phoneNumber must be in E.164 format (e.g. +14155552671)",
+    }),
+});
+
+const verifyOtpSchema = Joi.object({
+  phoneNumber: Joi.string()
+    .trim()
+    .pattern(/^\+[1-9]\d{6,14}$/)
+    .required()
+    .messages({
+      "string.pattern.base": "phoneNumber must be in E.164 format (e.g. +14155552671)",
+    }),
+  code: Joi.string()
+    .trim()
+    .pattern(/^\d{4,10}$/)
+    .required()
+    .messages({
+      "string.pattern.base": "code must be 4 to 10 digits",
+    }),
+});
+
 // Routes
 router.post("/register", validate(registerSchema), AuthController.register);
 const EmailOtpController = require("../controllers/emailOtpController");
@@ -30,6 +56,8 @@ const PasswordResetController = require("../controllers/passwordResetController"
 
 router.post("/send-email-otp", EmailOtpController.sendEmailOtp);
 router.post("/verify-email-otp", EmailOtpController.verifyEmailOtp);
+router.post("/send-otp", validate(sendOtpSchema), AuthController.sendOtp);
+router.post("/verify-otp", validate(verifyOtpSchema), AuthController.verifyOtp);
 router.post("/login", validate(loginSchema), AuthController.login);
 router.post("/google", AuthController.googleLogin);
 router.post("/facebook", AuthController.facebookLogin);
