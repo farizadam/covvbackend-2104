@@ -60,12 +60,19 @@ class EmailOtpController {
 
       await sendEmail({
         to: email,
-        subject: "Your Airport Carpooling verification code",
+        subject: "Your Airport Carpooling Verification Code",
         text: `Your verification code is ${code}. It expires in 10 minutes.`,
-        html: `<p>Your verification code is <strong>${code}</strong>.</p><p>This code expires in 10 minutes.</p>`,
+        html: `
+    <div style="font-family: sans-serif; padding: 20px; border: 1px solid #eee;">
+      <h2 style="color: #333;">Verification Code</h2>
+      <p>This is a live test email sent through <strong>Resend</strong> from the airport-app backend.</p>
+      <p style="font-size: 24px; font-weight: bold; color: #007bff;">${code}</p>
+      <p style="color: #666;">This code expires in 10 minutes.</p>
+    </div>
+  `,
       });
 
-      res.json({ success: true, message: "OTP sent" });
+      res.json({ success: true, message: "OTP sent via Resend" });
     } catch (err) {
       next(err);
     }
