@@ -2,7 +2,7 @@ const bcrypt = require("bcrypt");
 const { sendEmail } = require("../services/emailService");
 const EmailOtp = require("../models/EmailOtp");
 const User = require("../models/User");
-const { checkSmsVerification } = require("../utils/twilioVerify");
+const { sendSmsVerification, checkSmsVerification } = require("../utils/twilioVerify");
 
 const OTP_TTL_SECONDS = 10 * 60; // 10 minutes
 const VERIFIED_TTL_SECONDS = 15 * 60; // 15 minutes to reset password after verification
@@ -53,51 +53,48 @@ class PasswordResetController {
         });
       }
 
-      // Use the user's email as the key with a reset: prefix to avoid collision with register OTP
+      // Use the user's email as reset key (same key for email and phone reset verification)
       const email = user.email.toLowerCase().trim();
       const resetKey = `reset:${email}`;
 
-      let doc = await EmailOtp.findOne({ email: resetKey });
-      const now = new Date();
-      if (!doc) {
-        doc = new EmailOtp({ email: resetKey, sendCount: 0, attempts: 0 });
-      } else {
-        if (doc.lastSentAt && now - doc.lastSentAt > 60 * 60 * 1000) {
+      if (identifier_type === "email") {
+        let doc = await EmailOtp.findOne({ email: resetKey });
+        const now = new Date();
+        if (!doc) {
+          doc = new EmailOtp({ email: resetKey, sendCount: 0, attempts: 0 });
+        } else if (doc.lastSentAt && now - doc.lastSentAt > 60 * 60 * 1000) {
           doc.sendCount = 0;
           doc.attempts = 0;
           doc.lastSentAt = undefined;
         }
-      }
 
-      if (
-        (doc.sendCount || 0) >= 5 &&
-        doc.lastSentAt &&
-        now - doc.lastSentAt <= 60 * 60 * 1000
-      ) {
-        return res.status(429).json({
-          success: false,
-          message: "Too many reset requests. Try later.",
-        });
-      }
+        if (
+          (doc.sendCount || 0) >= 5 &&
+          doc.lastSentAt &&
+          now - doc.lastSentAt <= 60 * 60 * 1000
+        ) {
+          return res.status(429).json({
+            success: false,
+            message: "Too many reset requests. Try later.",
+          });
+        }
 
-      const code = generateOtp();
-      console.log("DEBUG forgot-password send-code: OTP for", email, "=", code);
-      const hash = await bcrypt.hash(code, SALT_ROUNDS);
+        const code = generateOtp();
+        const hash = await bcrypt.hash(code, SALT_ROUNDS);
 
-      doc.code_hash = hash;
-      doc.expiresAt = new Date(Date.now() + OTP_TTL_SECONDS * 1000);
-      doc.lastSentAt = now;
-      doc.sendCount = (doc.sendCount || 0) + 1;
-      doc.attempts = 0;
-      doc.verified = false;
-      await doc.save();
+        doc.code_hash = hash;
+        doc.expiresAt = new Date(Date.now() + OTP_TTL_SECONDS * 1000);
+        doc.lastSentAt = now;
+        doc.sendCount = (doc.sendCount || 0) + 1;
+        doc.attempts = 0;
+        doc.verified = false;
+        await doc.save();
 
-      // Send code via email
-      await sendEmail({
-        to: email,
-        subject: "Password Reset Code",
-        text: `Your password reset code is: ${code}. It expires in 10 minutes.`,
-        html: `
+        await sendEmail({
+          to: email,
+          subject: "Password Reset Code",
+          text: `Your password reset code is: ${code}. It expires in 10 minutes.`,
+          html: `
           <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
             <h2 style="color: #1E40AF;">Password Reset</h2>
             <p>You requested a password reset. Use the code below to verify your identity:</p>
@@ -107,7 +104,38 @@ class PasswordResetController {
             <p style="color: #64748B; font-size: 14px;">This code expires in 10 minutes. If you didn't request this, please ignore this email.</p>
           </div>
         `,
-      });
+        });
+      } else {
+        try {
+          await sendSmsVerification(user.phone);
+        } catch (error) {
+          if (
+            error?.message?.includes("Twilio credentials are missing") ||
+            error?.status === 401
+          ) {
+            return res.status(500).json({
+              success: false,
+              message: "OTP service is not configured",
+            });
+          }
+
+          if (error?.status === 400) {
+            return res.status(400).json({
+              success: false,
+              message: "Invalid phone number",
+            });
+          }
+
+          if (error?.status === 429) {
+            return res.status(429).json({
+              success: false,
+              message: "Too many OTP requests. Please try again later.",
+            });
+          }
+
+          throw error;
+        }
+      }
 
       // Return masked info
       let maskedDestination;
@@ -167,6 +195,11 @@ class PasswordResetController {
       }
 
       if (doc.expiresAt && new Date() > doc.expiresAt) {
+        try {
+          await doc.deleteOne();
+        } catch (e) {
+          // ignore cleanup failure
+        }
         return res.status(400).json({ success: false, message: "Reset code expired. Request a new one." });
       }
 
