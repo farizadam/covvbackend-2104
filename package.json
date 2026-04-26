@@ -9,6 +9,7 @@
     "seed": "node src/seeds/airports.js",
     "db:indexes:trip-cards": "node scripts/add_trip_card_indexes.js",
     "db:perf:snapshot": "node scripts/db_perf_snapshot.js",
+    "db:check:password-reset-otps": "node scripts/check_password_reset_otps.js",
     "setup": "npm run seed",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

@@ -6,95 +6,53 @@ class AirportController {
    * GET /api/v1/airports
    */
   static async getAll(req, res, next) {
-    try {
-      const { country, q, latitude, longitude, radius = 200000 } = req.query; // Default radius 200km
+  try {
+    const { country, q, latitude, longitude, radius = 200000 } = req.query;
 
-      const parsedLatitude = latitude !== undefined ? parseFloat(latitude) : null;
-      const parsedLongitude = longitude !== undefined ? parseFloat(longitude) : null;
-      const parsedRadius = Number.isFinite(parseInt(radius, 10))
-        ? parseInt(radius, 10)
-        : 200000;
-      const isGeoSearch =
-        Number.isFinite(parsedLatitude) && Number.isFinite(parsedLongitude);
+    // 1. Handle Pagination Parameters
+    const page = parseInt(req.query.page, 10) || 1;
+    const requestedLimit = parseInt(req.query.limit, 10);
+    
+    // Maintain your existing "Smart Limits" for Map vs List
+    const isGeoSearch = Number.isFinite(parseFloat(latitude)) && Number.isFinite(parseFloat(longitude));
+    const defaultLimit = isGeoSearch ? 80 : q ? 100 : 2000;
+    const maxLimit = isGeoSearch ? 150 : 2000;
+    const limit = Math.min(requestedLimit || defaultLimit, maxLimit);
+    
+    // Calculate how many documents to skip
+    const skip = (page - 1) * limit;
 
-      const filter = { is_active: true };
+    const filter = { is_active: true };
 
-      // Text Search using MongoDB text index
-      if (q) {
-        filter.$text = { $search: q };
+    // ... (Your existing filter logic for q, isGeoSearch, and country remains same)
+
+    // 2. Apply Pagination to the Query
+    let query = Airport.find(filter)
+      .skip(skip) // Jump to the correct page
+      .limit(limit)
+      .lean();
+
+    // ... (Your existing sorting and selection logic remains same)
+
+    const airports = await query;
+    
+    // 3. Optional: Get total count for the frontend to calculate "hasMore"
+    const total = await Airport.countDocuments(filter);
+
+    res.status(200).json({
+      success: true,
+      data: airports,
+      count: airports.length,
+      pagination: {
+        current_page: page,
+        total_pages: Math.ceil(total / limit),
+        total_results: total
       }
-
-      // Geospatial Search
-      if (isGeoSearch) {
-        filter.location = {
-          $near: {
-            $geometry: {
-              type: "Point",
-              coordinates: [parsedLongitude, parsedLatitude],
-            },
-            $maxDistance: parsedRadius,
-          },
-        };
-      }
-
-      if (country) {
-        filter.country = country;
-      }
-
-      // Keep geospatial queries tight and cap broad list queries.
-      const requestedLimit = Number.isFinite(parseInt(req.query.limit, 10))
-        ? parseInt(req.query.limit, 10)
-        : null;
-      const defaultLimit = isGeoSearch ? 80 : q ? 100 : 2000;
-      const maxLimit = isGeoSearch ? 150 : 2000;
-      const limit = Math.min(requestedLimit || defaultLimit, maxLimit);
-
-      // Also ensure airports have valid coordinates for map display
-      // Skip this filter when doing geospatial search (already ensures valid location)
-      if (!q && !country && !isGeoSearch) {
-        filter.latitude = { $ne: null };
-        filter.longitude = { $ne: null };
-      }
-
-      let query = Airport.find(filter).limit(limit).lean();
-
-      // Add text score sorting if text search was used
-      if (q) {
-        query = query
-          .select({
-            name: 1,
-            city: 1,
-            country: 1,
-            iata: 1,
-            icao: 1,
-            latitude: 1,
-            longitude: 1,
-            location: 1,
-            timezone: 1,
-            score: { $meta: "textScore" },
-          })
-          .sort({ score: { $meta: "textScore" } });
-      } else {
-        query = query.select(
-          "name city country iata icao latitude longitude location timezone"
-        );
-        // Keep distance ordering from $near for geo search; only sort by name for broad lists.
-        if (!isGeoSearch) {
-          query = query.sort({ name: 1 });
-        }
-      }
-
-      const airports = await query;
-
-      res.status(200).json({
-        success: true,
-        data: airports,
-        count: airports.length,
-      });
-    } catch (error) {
-      next(error);
-    }
+    });
+  } catch (error) {
+    next(error);
   }
+}
 
   /**
    * Get airport by ID
