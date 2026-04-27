@@ -36,7 +36,7 @@ const walletSchema = new mongoose.Schema(
     currency: {
       type: String,
       default: "EUR",
-      enum: ["EUR", "USD", "GBP"],
+      enum: ["EUR"],
     },
     is_active: {
       type: Boolean,
