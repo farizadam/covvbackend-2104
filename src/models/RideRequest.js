@@ -151,6 +151,9 @@ rideRequestSchema.index({
   preferred_datetime: 1,
 });
 rideRequestSchema.index({ passenger: 1, status: 1 });
+rideRequestSchema.index({ "offers.driver": 1, created_at: -1 });
+rideRequestSchema.index({ "offers.driver": 1, status: 1, created_at: -1 });
+rideRequestSchema.index({ matched_driver: 1, status: 1, created_at: -1 });
 rideRequestSchema.index({ location_city: 1 });
 rideRequestSchema.index({ expires_at: 1 });
 rideRequestSchema.index({ location: "2dsphere" });

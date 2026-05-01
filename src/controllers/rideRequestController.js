@@ -397,7 +397,7 @@ exports.getMyOffers = async (req, res, next) => {
         "_id id passenger airport direction location_address location_city location_postcode preferred_datetime seats_needed luggage status offers matched_driver created_at"
       )
       .populate("airport", "_id id name iata_code city country")
-      .populate("passenger", "_id id first_name last_name phone rating avatar_url")
+      .populate("passenger", "_id id first_name last_name phone rating")
       .sort({ created_at: -1 })
       .skip((pageNum - 1) * limitNum)
       .limit(limitNum)

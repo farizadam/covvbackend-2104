@@ -105,6 +105,8 @@ const bookingSchema = new mongoose.Schema(
 
 // Unique constraint: one booking per ride per passenger
 bookingSchema.index({ ride_id: 1, passenger_id: 1 }, { unique: true });
+bookingSchema.index({ passenger_id: 1, createdAt: -1 });
+bookingSchema.index({ passenger_id: 1, status: 1, createdAt: -1 });
 
 const Booking = mongoose.model("Booking", bookingSchema);
 

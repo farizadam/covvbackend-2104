@@ -56,6 +56,10 @@ const INDEX_PLAN = {
       key: { matched_driver: 1, status: 1, preferred_datetime: 1 },
       options: { name: "matched_driver_status_preferred_datetime" },
     },
+    {
+      key: { matched_driver: 1, status: 1, created_at: -1 },
+      options: { name: "matched_driver_status_created_desc" },
+    },
   ],
   bookings: [
     {

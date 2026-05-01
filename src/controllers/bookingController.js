@@ -164,7 +164,7 @@ class BookingController {
           select:
             "_id id direction datetime_start departure_datetime home_city location_city location_address dropoff_location price_per_seat status car_model car_color driver_id airport_id",
           populate: [
-            { path: "driver_id", select: "first_name last_name phone avatar_url rating" },
+            { path: "driver_id", select: "first_name last_name phone rating" },
             { path: "airport_id", select: "name iata_code" },
           ],
         })
@@ -195,7 +195,6 @@ class BookingController {
           driver_first_name: ride?.driver_id?.first_name,
           driver_last_name: ride?.driver_id?.last_name,
           driver_phone: ride?.driver_id?.phone,
-          driver_avatar_url: ride?.driver_id?.avatar_url,
           driver_rating: ride?.driver_id?.rating,
           airport_name: ride?.airport_id?.name,
           airport_code: ride?.airport_id?.iata_code,
